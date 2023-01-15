@@ -1,0 +1,3 @@
+epoch= 1, accuracy= 0.714688, rmse= 0.438335
+epoch= 2, accuracy= 0.724004, rmse= 0.429366
+epoch= 3, accuracy= 0.716756, rmse= 0.434665
