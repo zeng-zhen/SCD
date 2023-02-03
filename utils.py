@@ -26,7 +26,7 @@ class CommonArgParser(argparse.ArgumentParser):
 
 
 def construct_local_map(args):
-    remake()
+    remake(args)
     map = build_graph(args.student_n, args.exer_n, args.knowledge_n)
 
     return map
