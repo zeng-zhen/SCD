@@ -4,7 +4,7 @@ k = 2
 pmin = 0.4
 
 
-def remake(name=None):  # u→e
+def remake(args, name=None):  # u→e
     data_file = 'data/ASSIST/graph/e_from_u.txt'
     s_log_dict = torch.zeros(args.student_n)
     s_log_dict = s_log_dict.tolist()
