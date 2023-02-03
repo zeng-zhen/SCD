@@ -25,7 +25,7 @@ class TrainDataLoader(object):
             self.data = json.load(i_f)
         self.knowledge_dim = int(args.knowledge_n)
         self.student_dim = int(args.student_n)
-        self.exercise_dim = int(args.exercise_n)
+        self.exercise_dim = int(args.exer_n)
         self.edge_data = {}
         for log in self.data:
             knowledge_emb = [0.] * self.knowledge_dim
