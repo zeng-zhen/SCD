@@ -126,8 +126,8 @@ class Net(nn.Module):
         batch_size = h1.shape[0]
         negatives_mask = (~torch.eye(batch_size, batch_size,
                           dtype=bool)).to(self.device).float()
-        z1 = F.normalize(h1, dim=1)
-        z2 = F.normalize(h2, dim=1)
+        #z1 = F.normalize(h1, dim=1)
+        #z2 = F.normalize(h2, dim=1)
         similarity_matrix1 = F.cosine_similarity(
             z1.unsqueeze(1), z2.unsqueeze(0), dim=2)
         positives = torch.exp(torch.diag(similarity_matrix1) / t)
