@@ -36,7 +36,7 @@ class Net(nn.Module):
         self.prednet_full2 = nn.Linear(
             1 * args.knowledge_n, args.knowledge_n, bias=False)
 
-        self.prednet_full3 = nn.Linear(1 * args.knowledge_n, 1)
+        self.prednet_full3 = nn.Linear(args.knowledge_n, args.knowledge_n)
 
         # initialization
         for name, param in self.named_parameters():
@@ -95,22 +95,15 @@ class Net(nn.Module):
             batch_stu_emb = stu_emb2.repeat(exer_emb2.shape[0], 1)
             batch_exer_emb = exer_emb2
 
-        batch_stu_vector = batch_stu_emb.repeat(1, batch_stu_emb.shape[1]).reshape(
-            batch_stu_emb.shape[0], batch_stu_emb.shape[1], batch_stu_emb.shape[1])
-
-        # get batch exercise data
-        # 32 123
-        batch_exer_vector = batch_exer_emb.repeat(1, batch_exer_emb.shape[1]).reshape(
-            batch_exer_emb.shape[0], batch_exer_emb.shape[1], batch_exer_emb.shape[1])
 
         # CD
-        preference = torch.sigmoid(self.prednet_full1(batch_stu_vector))
-        diff = torch.sigmoid(self.prednet_full2(batch_exer_vector))
+        preference = torch.sigmoid(self.prednet_full1(batch_stu_emb))
+        diff = torch.sigmoid(self.prednet_full2(batch_exer_emb))
         o = torch.sigmoid(self.prednet_full3(preference - diff))
-        sum_out = torch.sum(o * kn_r.unsqueeze(2), dim=1)
-        count_of_concept = torch.sum(kn_r, dim=1).unsqueeze(1)
+        sum_out = torch.sum(o * kn_r, dim=1)
+        count_of_concept = torch.sum(kn_r, dim=1)
         output = sum_out / count_of_concept
-
+        output = output.unsqueeze(1)
         if predict is False:
             return output, contrastive_loss
         return output

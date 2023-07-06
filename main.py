@@ -70,7 +70,7 @@ def train(args, local_map):
         print('epoch time ', time_end - time_start, ' second')
 
         save_snapshot(net, 'model/' + 'epoch' + str(epoch + 1))
-        rmse, auc = predict(args, local_map, net, epoch, alpha)
+        predict(args, local_map, net, epoch, alpha)
 
 
 def predict(args, g, net, epoch, alpha):
@@ -115,7 +115,7 @@ def predict(args, g, net, epoch, alpha):
         f.write('epoch= %d, accuracy= %f, rmse= %f' %
                 (epoch + 1, accuracy, rmse))
 
-    return
+    return 
 
 
 def test(args, g, epoch):
@@ -192,4 +192,5 @@ def load_snapshot(model, filename):
 
 if __name__ == '__main__':
     args = CommonArgParser().parse_args()
-    test(args, construct_local_map(args), 2)
+    #test(args, construct_local_map(args), 2)
+    train(args, construct_local_map(args))

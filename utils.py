@@ -14,13 +14,13 @@ class CommonArgParser(argparse.ArgumentParser):
                           default=4163, help='The number for student.')
         self.add_argument('--gpu', type=int, default=0,
                           help='The id of gpu, e.g. 0.')
-        self.add_argument('--epoch_n', type=int, default=3,
+        self.add_argument('--epoch_n', type=int, default=4,
                           help='The epoch number of training')
         self.add_argument('--lr', type=float, default=0.0001,
                           help='Learning rate')
         self.add_argument('--test', action='store_true',
                           help='Evaluate the model on the testing set in the training process.')
-        self.add_argument('--alpha', type=float, default=0.1,
+        self.add_argument('--alpha', type=float, default=0.01,
                           help='contrastive learning')
 
 
