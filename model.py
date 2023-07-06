@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# from fusion import Fusion
 from gnn import GATLayer
 
 
@@ -15,26 +16,22 @@ class Net(nn.Module):
         self.prednet_input_len = self.knowledge_dim
         self.prednet_len1, self.prednet_len2 = 512, 256
         super(Net, self).__init__()
-
+        self.alphas = args.alphas
+        self.alphae = args.alphae
+        # network structure
         self.student_emb = nn.Embedding(self.emb_num, self.stu_dim)
         self.exercise_emb = nn.Embedding(self.exer_n, self.knowledge_dim)
         self.knowledge_emb = nn.Embedding(
-            self.knowledge_dim, self.knowledge_dim)
+            args.knowledge_n, self.knowledge_dim)
 
         self.gnet1 = GATLayer(
-            args.knowledge_n, args.knowledge_n, args.knowledge_n)
+            self.knowledge_dim, self.knowledge_dim, self.knowledge_dim)
         self.gnet2 = GATLayer(
-            args.knowledge_n, args.knowledge_n, args.knowledge_n)
+            self.knowledge_dim, self.knowledge_dim, self.knowledge_dim)
 
-        self.stu_full = nn.Linear(
-            2 * args.knowledge_n, args.knowledge_n, bias=False)
-        self.exer_full = nn.Linear(
-            2 * args.knowledge_n, args.knowledge_n, bias=False)
-        self.prednet_full1 = nn.Linear(
-            1 * args.knowledge_n, args.knowledge_n, bias=False)
+        self.prednet_full1 = nn.Linear(args.knowledge_n, args.knowledge_n, bias=False)
 
-        self.prednet_full2 = nn.Linear(
-            1 * args.knowledge_n, args.knowledge_n, bias=False)
+        self.prednet_full2 = nn.Linear(args.knowledge_n, args.knowledge_n, bias=False)
 
         self.prednet_full3 = nn.Linear(args.knowledge_n, args.knowledge_n)
 
@@ -43,7 +40,56 @@ class Net(nn.Module):
             if 'weight' in name:
                 nn.init.xavier_normal_(param)
 
-    def forward(self, stu_id, exer_id, kn_r, input_nodes, out_dict, blocks, predict=False, g1=None, g2=None):
+    def forward(self, stu_id, exer_id, kn_r, input_nodes, output_nodes, blocks, stu_index, exer_index, g1=None, g2=None):
+        stu_emb = self.student_emb(input_nodes['stu']).to(self.device)
+        exer_emb = self.exercise_emb(input_nodes['exer']).to(self.device)
+        k_emb = self.knowledge_emb(input_nodes['k']).to(self.device)
+
+        node_emb = {'stu': stu_emb, 'exer': exer_emb, 'k': k_emb}
+        node_emb1 = self.gnet1(blocks[0], node_emb)
+        node_emb2 = self.gnet2(blocks[1], node_emb1)
+
+        exer_emb2 = node_emb2['exer']
+        stu_emb2 = node_emb2['stu']
+
+        stu_emb_g1 = self.student_emb(g1[0]['stu']).to(self.device)
+        exer_emb_g1 = self.exercise_emb(g1[0]['exer']).to(self.device)
+        k_emb_g1 = self.knowledge_emb(g1[0]['k']).to(self.device)
+        node_emb_g1 = {'stu': stu_emb_g1, 'exer': exer_emb_g1, 'k': k_emb_g1}
+        graph1_node_emb1 = self.gnet1(g1[2][0], node_emb_g1)
+        graph1_node_emb2 = self.gnet2(g1[2][1], graph1_node_emb1)
+        stu_emb2_g1 = graph1_node_emb2['stu']
+        exer_emb2_g1 = graph1_node_emb2['exer']
+        # e_map2
+        stu_emb_g2 = self.student_emb(g2[0]['stu']).to(self.device)
+        exer_emb_g2 = self.exercise_emb(g2[0]['exer']).to(self.device)
+        k_emb_g2 = self.knowledge_emb(g2[0]['k']).to(self.device)
+        node_emb_g2 = {'stu': stu_emb_g2, 'exer': exer_emb_g2, 'k': k_emb_g2}
+        graph2_node_emb1 = self.gnet1(g2[2][0], node_emb_g2)
+        graph2_node_emb2 = self.gnet2(g2[2][1], graph2_node_emb1)
+        stu_emb2_g2 = graph2_node_emb2['stu']
+        exer_emb2_g2 = graph2_node_emb2['exer']
+        c_s_h1_loss = self.contrastive_loss(stu_emb2_g1, stu_emb2_g2)
+        c_s_h2_loss = self.contrastive_loss(stu_emb2_g2, stu_emb2_g1)
+        c_e_h1_loss = self.contrastive_loss(exer_emb2_g1, exer_emb2_g2)
+        c_e_h2_loss = self.contrastive_loss(exer_emb2_g2, exer_emb2_g1)
+        contrastive_loss = (self.alphas * (c_s_h1_loss + c_s_h2_loss) +
+                                self.alphae * (c_e_h1_loss + c_e_h2_loss))
+
+        batch_stu_emb = stu_emb2[stu_index]
+        batch_exer_emb = exer_emb2[exer_index]
+
+        preference = torch.sigmoid(self.prednet_full1(batch_stu_emb))
+        diff = torch.sigmoid(self.prednet_full2(batch_exer_emb))
+        o = torch.sigmoid(self.prednet_full3(preference - diff))
+        sum_out = torch.sum(o * kn_r, dim=1)
+        count_of_concept = torch.sum(kn_r, dim=1)
+        output = sum_out / count_of_concept
+        output = output.unsqueeze(1)
+
+        return output, contrastive_loss
+
+    def forward_test(self, stu_id, exer_id, kn_r, input_nodes, out_dict, blocks):
         stu_emb = self.student_emb(input_nodes['stu']).to(self.device)
         exer_emb = self.exercise_emb(input_nodes['exer']).to(self.device)
         k_emb = self.knowledge_emb(input_nodes['k']).to(self.device)
@@ -56,47 +102,10 @@ class Net(nn.Module):
 
         exer_emb2 = node_emb2['exer']
         stu_emb2 = node_emb2['stu']
-        k_emb = node_emb2['k']
 
-        if predict is False:
-            stu_emb_g1 = self.student_emb(g1[0]['stu']).to(self.device)
-            exer_emb_g1 = self.exercise_emb(g1[0]['exer']).to(self.device)
-            k_emb_g1 = self.knowledge_emb(g1[0]['k']).to(self.device)
-            node_emb_g1 = {'stu': stu_emb_g1,
-                           'exer': exer_emb_g1, 'k': k_emb_g1}
-            node_emb1_g1 = self.gnet1(g1[2][0], node_emb_g1)
-            node_emb2_g1 = self.gnet2(g1[2][1], node_emb1_g1)
-            stu_emb2_g1 = node_emb2_g1['stu'].squeeze()
-            exer_emb2_g1 = node_emb2_g1['exer'].squeeze()
+        batch_stu_emb = stu_emb2.repeat(exer_emb2.shape[0], 1)
+        batch_exer_emb = exer_emb2
 
-            stu_emb_g2 = self.student_emb(g2[0]['stu']).to(self.device)
-            exer_emb_g2 = self.exercise_emb(g2[0]['exer']).to(self.device)
-            k_emb_g2 = self.knowledge_emb(g2[0]['k']).to(self.device)
-            node_emb_g2 = {'stu': stu_emb_g2,
-                           'exer': exer_emb_g2, 'k': k_emb_g2}
-            node_emb1_g2 = self.gnet1(g2[2][0], node_emb_g2)
-            node_emb2_g2 = self.gnet2(g2[2][1], node_emb1_g2)
-            stu_emb2_g2 = node_emb2_g2['stu'].squeeze()
-            exer_emb2_g2 = node_emb2_g2['exer'].squeeze()
-
-            c_s_h1_loss = self.contrastive_loss(stu_emb2_g1, stu_emb2_g2)
-            c_s_h2_loss = self.contrastive_loss(stu_emb2_g2, stu_emb2_g1)
-            c_e_h1_loss = self.contrastive_loss(exer_emb2_g1, exer_emb2_g2)
-            c_e_h2_loss = self.contrastive_loss(exer_emb2_g2, exer_emb2_g1)
-
-            contrastive_loss = (0.5 * (c_s_h1_loss + c_s_h2_loss) + 0.5 * (c_e_h1_loss + c_e_h2_loss))
-
-        if predict is False:
-            batch_stu_id = out_dict.edges(etype='serelate')[0]
-            batch_exer_id = out_dict.edges(etype='serelate')[1]
-            batch_stu_emb = stu_emb2[batch_stu_id]
-            batch_exer_emb = exer_emb2[batch_exer_id]
-        else:
-            batch_stu_emb = stu_emb2.repeat(exer_emb2.shape[0], 1)
-            batch_exer_emb = exer_emb2
-
-
-        # CD
         preference = torch.sigmoid(self.prednet_full1(batch_stu_emb))
         diff = torch.sigmoid(self.prednet_full2(batch_exer_emb))
         o = torch.sigmoid(self.prednet_full3(preference - diff))
@@ -104,8 +113,6 @@ class Net(nn.Module):
         count_of_concept = torch.sum(kn_r, dim=1)
         output = sum_out / count_of_concept
         output = output.unsqueeze(1)
-        if predict is False:
-            return output, contrastive_loss
         return output
 
     def apply_clipper(self):
@@ -113,6 +120,7 @@ class Net(nn.Module):
         self.prednet_full1.apply(clipper)
         self.prednet_full2.apply(clipper)
         self.prednet_full3.apply(clipper)
+
 
     def contrastive_loss(self, h1, h2):
         t = 0.5
@@ -123,10 +131,17 @@ class Net(nn.Module):
         z2 = F.normalize(h2, dim=1)
         similarity_matrix1 = F.cosine_similarity(
             z1.unsqueeze(1), z2.unsqueeze(0), dim=2)
-        positives = torch.exp(torch.diag(similarity_matrix1) / t)
-        negatives = negatives_mask * torch.exp(similarity_matrix1 / t)
-        loss_partial = -torch.log(positives / (positives + torch.sum(negatives, dim=1)))
-        loss = torch.sum(loss_partial) / batch_size
+        positives = torch.exp(torch.diag(similarity_matrix1)/t)
+        negatives1 = negatives_mask * torch.exp(similarity_matrix1/t)
+        similarity_matrix2 = F.cosine_similarity(
+            z1.unsqueeze(1), z1.unsqueeze(0), dim=2)
+        negatives2 = negatives_mask * torch.exp(similarity_matrix2/t)
+        similarity_matrix3 = F.cosine_similarity(
+            z2.unsqueeze(1), z2.unsqueeze(0), dim=2)
+        negatives3 = negatives_mask * torch.exp(similarity_matrix3/t)
+        loss_partial = -torch.log(positives/(positives+torch.sum(negatives1, dim=1)+torch.sum(negatives2, dim=1)+torch.sum(negatives3, dim=1)))
+        loss = torch.sum(loss_partial)/batch_size
+
         return loss
 
 

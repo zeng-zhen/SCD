@@ -1,9 +1,12 @@
 #from dgl.subgraph import edge_subgraph
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import json
+
+from sklearn.metrics import roc_auc_score
 from data_loader import TrainDataLoader, ValTestDataLoader
 from model import Net
 from utils import CommonArgParser, construct_local_map, build_ue
@@ -11,8 +14,7 @@ import time
 
 
 def train(args, local_map):
-    alpha = args.alpha
-    data_loader = TrainDataLoader(args, local_map)
+    data_loader = TrainDataLoader(local_map)
     device = torch.device(('cuda:%d' % (args.gpu))
                           if torch.cuda.is_available() else 'cpu')
 
@@ -22,38 +24,23 @@ def train(args, local_map):
     print('training model...')
     loss_function = nn.NLLLoss()
     for epoch in range(args.epoch_n):
+        data_loader.reset()
         time_start = time.time()
         running_loss = 0.0
         batch_count = 0
         net.train()
-        for input_nodes, edge_subgraph, blocks in data_loader.gdataloader:
+        while not data_loader.is_end():
+            input_stu_ids, input_exer_ids, input_knowledge_embs, labels, stu_index, exer_index, input_nodes, output_nodes, blocks = data_loader.next_batch()
             data_loader.g1 = build_ue(args, name="map1")
             data_loader.g2 = build_ue(args, name="map2")
             g1 = data_loader.get(blocks[1].dstdata['_ID'], 1)
             g2 = data_loader.get(blocks[1].dstdata['_ID'], 2)
-            input_stu_ids, input_exer_ids, input_knowledge_embs, labels = [], [], [], []
-            for stu, exer in zip(edge_subgraph.edges(etype='serelate')[0], edge_subgraph.edges(etype='serelate')[1]):
-                stu_id = edge_subgraph.nodes['stu'].data['_ID'][stu]
-                exer_id = edge_subgraph.nodes['exer'].data['_ID'][exer]
-                input_stu_ids.append(stu_id)
-                input_exer_ids.append(exer_id)
-                knowledge_emb = data_loader.edge_data[(
-                    int(stu_id), int(exer_id))]['knowledge_emb']
-                input_knowledge_embs.append(knowledge_emb)
-                y = data_loader.edge_data[(int(stu_id), int(exer_id))]['y']
-                labels.append(y)
             optimizer.zero_grad()
-            input_stu_ids, input_exer_ids, input_knowledge_embs, labels = torch.LongTensor(input_stu_ids).to(device), torch.LongTensor(
-                input_exer_ids).to(device), torch.Tensor(input_knowledge_embs).to(device), torch.LongTensor(labels).to(device)
-            output_1, c_loss = net.forward(input_stu_ids, input_exer_ids,
-                                           input_knowledge_embs, input_nodes, edge_subgraph, blocks, g1=g1, g2=g2)
-
+            output_1, c_loss = net.forward(input_stu_ids, input_exer_ids, input_knowledge_embs, input_nodes, output_nodes, blocks, stu_index, exer_index, g1=g1, g2=g2)
             output_0 = torch.ones(output_1.size()).to(device) - output_1
             output = torch.cat((output_0, output_1), 1)
-
             loss = loss_function(torch.log(output + 1e-10), labels)
-
-            allloss = loss + alpha * c_loss
+            allloss = loss + args.alpha * c_loss
 
             allloss.backward()
             optimizer.step()
@@ -68,21 +55,21 @@ def train(args, local_map):
 
         time_end = time.time()
         print('epoch time ', time_end - time_start, ' second')
+        # validate and save current model every epoch
+        save_snapshot(net, 'model/' + 'model' + '_epoch' + str(epoch + 1))
+        predict(args, local_map, net, epoch)
 
-        save_snapshot(net, 'model/' + 'epoch' + str(epoch + 1))
-        predict(args, local_map, net, epoch, alpha)
 
-
-def predict(args, g, net, epoch, alpha):
+def predict(args, g, net, epoch):
     device = torch.device(('cuda:%d' % (args.gpu))
                           if torch.cuda.is_available() else 'cpu')
-    data_loader = ValTestDataLoader(args,g)
+    data_loader = ValTestDataLoader(g)
     print('predicting model...')
     data_loader.reset()
     net.eval()
     time_start = time.time()
     correct_count, exer_count = 0, 0
-    batch_count = 0
+    batch_count, batch_avg_loss = 0, 0.0
     pred_all, label_all = [], []
     while not data_loader.is_end():
         batch_count += 1
@@ -90,8 +77,7 @@ def predict(args, g, net, epoch, alpha):
         input_stu_ids, input_exer_ids, input_knowledge_embs, labels = input_stu_ids.to(
             device), input_exer_ids.to(device), input_knowledge_embs.to(device), labels.to(device)
         input_nodes, output_nodes, blocks = next(iter(gdataloader))
-        output = net.forward(input_stu_ids, input_exer_ids, input_knowledge_embs,
-                             input_nodes, output_nodes, blocks, predict=True)
+        output = net.forward_test(input_stu_ids, input_exer_ids, input_knowledge_embs, input_nodes, output_nodes, blocks)
         output = output.view(-1)
         # compute accuracy
         for i in range(len(labels)):
@@ -106,56 +92,47 @@ def predict(args, g, net, epoch, alpha):
     accuracy = correct_count / exer_count
     # compute RMSE
     rmse = np.sqrt(np.mean((label_all - pred_all)**2))
-
+    # compute AUC
+    auc = roc_auc_score(label_all, pred_all)
     time_end = time.time()
     print('predict time ', time_end - time_start, ' second')
-    print('epoch= %d, accuracy= %f, rmse= %f' %
-          (epoch + 1, accuracy, rmse))
-    with open('result/' + str(alpha) + 'ncd_model_val.txt', 'a', encoding='utf8') as f:
-        f.write('epoch= %d, accuracy= %f, rmse= %f' %
-                (epoch + 1, accuracy, rmse))
+    print('epoch= %d, accuracy= %f, rmse= %f, auc= %f' %
+          (epoch + 1, accuracy, rmse, auc))
+    with open('result/' + 'scd_model_val.txt', 'a', encoding='utf8') as f:
+        f.write('epoch= %d, accuracy= %f, rmse= %f, auc= %f\n' %
+                (epoch + 1, accuracy, rmse, auc))
 
-    return 
+    return
 
 
 def test(args, g, epoch):
     device = torch.device(('cuda:%d' % (args.gpu))
                           if torch.cuda.is_available() else 'cpu')
-    data_loader = ValTestDataLoader(args,g)
+    data_loader = ValTestDataLoader(g)
     print('predicting model...')
     data_loader.reset()
     net = Net(args)
-    load_snapshot(net, 'model/' + 'epoch' + str(epoch))
+    load_snapshot(net, 'model/' + 'model' + '_epoch' + str(epoch))
     net.to(device)
     net.eval()
-
     correct_count, exer_count = 0, 0
+    batch_count, batch_avg_loss = 0, 0.0
     pred_all, label_all = [], []
-    student_set = {}
-    student_rmse = {}
     while not data_loader.is_end():
+        batch_count += 1
         input_stu_ids, input_exer_ids, input_knowledge_embs, labels, gdataloader = data_loader.next_batch()
         input_stu_ids, input_exer_ids, input_knowledge_embs, labels = input_stu_ids.to(
             device), input_exer_ids.to(device), input_knowledge_embs.to(device), labels.to(device)
         input_nodes, output_nodes, blocks = next(iter(gdataloader))
-        output = net.forward(input_stu_ids, input_exer_ids, input_knowledge_embs,
-                             input_nodes, output_nodes, blocks, predict=True)
+        output = net.forward_test(input_stu_ids, input_exer_ids, input_knowledge_embs, input_nodes, output_nodes, blocks)
         output = output.view(-1)
         # compute accuracy
-        stuid = int(input_stu_ids[0].item())
-        stu_correct_count, stu_exer_count = 0.0, 0.0
+        stu_correct_count = 0.0
         for i in range(len(labels)):
             if (labels[i] == 1 and output[i] > 0.5) or (labels[i] == 0 and output[i] < 0.5):
                 stu_correct_count += 1
                 correct_count += 1
-        stu_exer_count = len(labels)
         exer_count += len(labels)
-
-        student_set[stuid] = stu_correct_count / stu_exer_count
-        pred_stu = np.array(output.to(torch.device('cpu')).tolist())
-        label_stu = np.array(labels.to(torch.device('cpu')).tolist())
-        student_rmse[stuid] = np.sqrt(np.mean((label_stu - pred_stu)**2))
-
         pred_all += output.to(torch.device('cpu')).tolist()
         label_all += labels.to(torch.device('cpu')).tolist()
 
@@ -165,16 +142,14 @@ def test(args, g, epoch):
     accuracy = correct_count / exer_count
     # compute RMSE
     rmse = np.sqrt(np.mean((label_all - pred_all)**2))
+    # compute AUC
+    auc = roc_auc_score(label_all, pred_all)
+    print('epoch= %d, accuracy= %f, rmse= %f, auc= %f' %
+          (epoch, accuracy, rmse, auc))
+    with open('result/'+'scd_model_val.txt', 'a', encoding='utf8') as f:
+        f.write('epoch= %d, accuracy= %f, rmse= %f, auc= %f\n' %
+                (epoch, accuracy, rmse, auc))
 
-    print('epoch= %d, accuracy= %f, rmse= %f' %
-          (epoch, accuracy, rmse))
-    with open('result/'+'ncd_model_val.txt', 'a', encoding='utf8') as f:
-        f.write('epoch= %d, accuracy= %f, rmse= %f' %
-                (epoch, accuracy, rmse))
-    with open('./result/' + 'divede_by_student.json', 'w', encoding='utf8') as output_file:
-        json.dump(student_set, output_file, indent=4, ensure_ascii=False)
-    with open('./result/' + 'divede_by_student_rmse.json', 'w', encoding='utf8') as output_file:
-        json.dump(student_rmse, output_file, indent=4, ensure_ascii=False)
     return
 
 
@@ -192,5 +167,4 @@ def load_snapshot(model, filename):
 
 if __name__ == '__main__':
     args = CommonArgParser().parse_args()
-    #test(args, construct_local_map(args), 2)
     train(args, construct_local_map(args))

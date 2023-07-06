@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import dgl.nn.pytorch.hetero as hetero
 import dgl.nn.pytorch.conv.gatconv as gatconv
+from dgl import function as fn
+
+
 
 
 class GATLayer(hetero.HeteroGraphConv):
@@ -15,7 +18,7 @@ class GATLayer(hetero.HeteroGraphConv):
         elif dsttype == 'exer':
             score0 = self.e_attn0(torch.cat([input, tensors[0]], dim=1))
             score1 = self.e_attn1(torch.cat([input, tensors[1]], dim=1))
-            score = F.softmax(torch.cat([score0, score1], dim=1), dim=1)
+            score = F.softmax(torch.cat([score0, score1], dim=1), dim=1) 
             emb = input + score[:, 0].unsqueeze(1) * tensors[0] + score[:, 1].unsqueeze(1) * tensors[1]
             return emb
         elif dsttype == 'k':
@@ -25,7 +28,7 @@ class GATLayer(hetero.HeteroGraphConv):
             return emb
 
     def __init__(self, in_dim, out_dim, knowledge_n):
-        mods = {'esrelate': gatconv.GATConv(in_dim, out_dim, num_heads=1), 'serelate': gatconv.GATConv(in_dim, out_dim, num_heads=1), 'ekrelate': gatconv.GATConv(in_dim, out_dim, num_heads=1), 'kerelate': gatconv.GATConv(in_dim, out_dim, num_heads=1)}
+        mods = {'esrelate': gatconv.GATConv(in_dim, out_dim, num_heads=1), 'serelate': gatconv.GATConv(in_dim, out_dim, num_heads=1), 'ekrelate': gatconv.GATConv(in_dim, out_dim,num_heads=1), 'kerelate': gatconv.GATConv(in_dim, out_dim,num_heads=1)}
         super(GATLayer, self).__init__(mods, aggregate=self.my_aggregate)
         self.e_attn0 = nn.Linear(2 * knowledge_n, 1, bias=True)
         self.e_attn1 = nn.Linear(2 * knowledge_n, 1, bias=True)
@@ -43,7 +46,6 @@ class GATLayer(hetero.HeteroGraphConv):
                 src_inputs, dst_inputs = inputs
             else:
                 src_inputs = inputs
-                #print(inputs['k'])
                 dst_inputs = {k: v[:g.number_of_dst_nodes(k)] for k, v in inputs.items()}
 
             for stype, etype, dtype in g.canonical_etypes:
@@ -70,3 +72,5 @@ class GATLayer(hetero.HeteroGraphConv):
             if len(alist) != 0:
                 rsts[nty] = self.my_aggregate(dst_inputs[nty], alist, nty)
         return rsts
+
+

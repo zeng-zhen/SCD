@@ -1,16 +1,16 @@
-import random
 import torch
-k = 2
-pmin = 0.4
+stu_num = 4163
+exer_num = 17751
 
 
-def remake(args, name=None):  # u→e
-    data_file = 'data/ASSIST/graph/e_from_u.txt'
-    s_log_dict = torch.zeros(args.student_n)
+def remake(name=None):  # u→e
+    data_file = '/home/q21201141/data/ASSIST_log5_64/graph/e_from_u.txt'
+    s_log_dict = torch.zeros(stu_num)
     s_log_dict = s_log_dict.tolist()
-    e_log_dict = torch.zeros(args.exer_n)
+    e_log_dict = torch.zeros(exer_num)
     e_log_dict = e_log_dict.tolist()
     data = []
+
     with open(data_file, encoding='utf8') as i_f:
         for line in i_f:
             stu, exer = line.replace('\n', '').split('\t')
@@ -23,31 +23,37 @@ def remake(args, name=None):  # u→e
     u_from_e = ''  # e(src) to k(dst)
     e_from_u = ''  # k(src) to k(dst)
 
-    i = 0
-    j = 0
     s_log_dict = torch.Tensor(s_log_dict)
     e_log_dict = torch.Tensor(e_log_dict)
-    e_log_dict = k / torch.log(e_log_dict + 1 + 10e-5)
-    e = torch.full((args.exer_n,), pmin)
-    e_log_dict = torch.where(e_log_dict > pmin, e_log_dict, e)
-    s_log_dict = k / torch.log(s_log_dict + 1 + 10e-5)
-    s = torch.full((args.student_n,), pmin)
-    s_log_dict = torch.where(s_log_dict > pmin, s_log_dict, s)
-    random.seed()
-    e_rand = torch.rand(len(data)).tolist()
-    random.seed()
-    s_rand = torch.rand(len(data)).tolist()
-    t = 0
-    for stu, exer in data:
-        if e_rand[t] < e_log_dict[exer]:
-            e_from_u += str(stu) + '\t' + str(exer) + '\n'
-            i += 1
-        if s_rand[t] < s_log_dict[stu]:
-            u_from_e += str(exer) + '\t' + str(stu) + '\n'
-            j += 1
-        t += 1
+    e_log_dict = torch.pow(e_log_dict.float().clamp(min=1),-0.25).clamp(min=torch.pow(torch.tensor(123), -0.5).to(e_log_dict.device))
+    s_log_dict = torch.pow(s_log_dict.float().clamp(min=1),-0.25).clamp(min=torch.pow(torch.tensor(123), -0.5).to(e_log_dict.device))
+    e_rand = torch.rand(len(data))
+    s_rand = torch.rand(len(data))
+    
+    exer_number = torch.LongTensor([e for (s,e) in data])
+    stu_number = torch.LongTensor([s for (s,e) in data])
+
+    e_mask = e_log_dict[exer_number] - e_rand
+    e_index = torch.nonzero(e_mask > 0).squeeze().tolist()
+    s_mask = s_log_dict[stu_number] - s_rand
+    s_index = torch.nonzero(s_mask > 0).squeeze().tolist()
+
+    e_from_u = [data[i] for i in e_index]
+    u_from_e = [data[i] for i in s_index]
+
+    e_from_u = [str(u) + '\t' + str(e) + '\n' for (u,e) in e_from_u]
+    u_from_e = [str(e) + '\t' + str(u) + '\n' for (u,e) in u_from_e]
+
+    e_from_u = "".join(e_from_u)
+    u_from_e = "".join(u_from_e)
     if name is not None:
-        with open('./data/ASSIST/graph/u_from_e' + name + '.txt', 'w') as f:
+        with open('./view/u_from_e' + name + '.txt', 'w') as f:
             f.write(u_from_e)
-        with open('./data/ASSIST/graph/e_from_u' + name + '.txt', 'w') as f:
+        with open('./view/e_from_u' + name + '.txt', 'w') as f:
             f.write(e_from_u)
+        
+            
+        
+            
+
+
