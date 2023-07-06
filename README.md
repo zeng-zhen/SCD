@@ -1,4 +1,4 @@
-# RCD
+# SCD
 Self-supervised Graph Learning for Long-tailed Cognitive Diagnosis
 
 ## Environment Settings
