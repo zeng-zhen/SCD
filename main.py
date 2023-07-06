@@ -115,7 +115,7 @@ def predict(args, g, net, epoch, alpha):
         f.write('epoch= %d, accuracy= %f, rmse= %f' %
                 (epoch + 1, accuracy, rmse))
 
-    return
+    return rmse, auc
 
 
 def test(args, g, epoch):
@@ -175,7 +175,7 @@ def test(args, g, epoch):
         json.dump(student_set, output_file, indent=4, ensure_ascii=False)
     with open('./result/' + 'divede_by_student_rmse.json', 'w', encoding='utf8') as output_file:
         json.dump(student_rmse, output_file, indent=4, ensure_ascii=False)
-    return
+    return rmse, auc
 
 
 def save_snapshot(model, filename):
