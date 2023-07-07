@@ -131,17 +131,10 @@ class Net(nn.Module):
         z2 = F.normalize(h2, dim=1)
         similarity_matrix1 = F.cosine_similarity(
             z1.unsqueeze(1), z2.unsqueeze(0), dim=2)
-        positives = torch.exp(torch.diag(similarity_matrix1)/t)
-        negatives1 = negatives_mask * torch.exp(similarity_matrix1/t)
-        similarity_matrix2 = F.cosine_similarity(
-            z1.unsqueeze(1), z1.unsqueeze(0), dim=2)
-        negatives2 = negatives_mask * torch.exp(similarity_matrix2/t)
-        similarity_matrix3 = F.cosine_similarity(
-            z2.unsqueeze(1), z2.unsqueeze(0), dim=2)
-        negatives3 = negatives_mask * torch.exp(similarity_matrix3/t)
-        loss_partial = -torch.log(positives/(positives+torch.sum(negatives1, dim=1)+torch.sum(negatives2, dim=1)+torch.sum(negatives3, dim=1)))
-        loss = torch.sum(loss_partial)/batch_size
-
+        positives = torch.exp(torch.diag(similarity_matrix1) / t)
+        negatives = negatives_mask * torch.exp(similarity_matrix1 / t)
+        loss_partial = -torch.log(positives / (positives + torch.sum(negatives, dim=1)))
+        loss = torch.sum(loss_partial) / batch_size
         return loss
 
 
